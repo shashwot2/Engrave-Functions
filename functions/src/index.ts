@@ -41,6 +41,7 @@ export const addDocument = onRequest((req, res) => {
     }
   });
 });
+
 export const getDecks = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {
@@ -48,7 +49,6 @@ export const getDecks = onRequest((req, res) => {
         return res.status(405).send("Method Not Allowed, use GET");
       }
 
-      // If a specific deck ID is provided in the query, return that document
       const deckId = req.query.deckId as string;
 
       if (deckId) {
@@ -62,7 +62,6 @@ export const getDecks = onRequest((req, res) => {
         return res.status(200).json(docSnapshot.data());
       }
 
-      // If no deck ID is provided, return all decks
       const querySnapshot = await db.collection("Deck").get();
       const decks = querySnapshot.docs.map((doc) => ({
         id: doc.id,
@@ -76,6 +75,7 @@ export const getDecks = onRequest((req, res) => {
     }
   });
 });
+
 export const addDeck = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {
@@ -83,22 +83,30 @@ export const addDeck = onRequest((req, res) => {
         return res.status(405).send("Method Not Allowed, use POST");
       }
 
-      const { user_id, name, description, tags, is_shared, shared_with, is_ai_generated } = req.body;
+      const {
+        userId,
+        name,
+        description,
+        tags,
+        isShared,
+        sharedWith,
+        isAiGenerated,
+      } = req.body;
 
-      if (!user_id || !name || !description || !Array.isArray(tags)) {
+      if (!userId || !name || !description || !Array.isArray(tags)) {
         return res.status(400).send("Bad Request: Missing required fields.");
       }
 
       const newDeck = {
-        user_id,
+        userId,
         name,
         description,
         tags,
-        is_shared: is_shared || false,
-        shared_with: shared_with || [],
-        is_ai_generated: is_ai_generated || false,
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
-        updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        isShared: isShared || false,
+        sharedWith: sharedWith || [],
+        isAiGenerated: isAiGenerated || false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
 
       const docRef = await db.collection("Deck").add(newDeck);
@@ -110,7 +118,6 @@ export const addDeck = onRequest((req, res) => {
   });
 });
 
-// New function to add a card to a specific deck
 export const addCard = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {
@@ -118,23 +125,34 @@ export const addCard = onRequest((req, res) => {
         return res.status(405).send("Method Not Allowed, use POST");
       }
 
-      const { deck_id, front_content, back_content, last_reviewed_at, next_review_at, review_count, ease_factor, interval } = req.body;
+      const {
+        deckId,
+        frontContent,
+        backContent,
+        lastReviewedAt,
+        nextReviewAt,
+        reviewCount,
+        easeFactor,
+        interval,
+      } = req.body;
 
-      if (!deck_id || !front_content || !back_content) {
+      if (!deckId || !frontContent || !backContent) {
         return res.status(400).send("Bad Request: Missing required fields.");
       }
 
       const newCard = {
-        deck_id,
-        front_content,
-        back_content,
-        last_reviewed_at: last_reviewed_at || admin.firestore.FieldValue.serverTimestamp(),
-        next_review_at: next_review_at || admin.firestore.FieldValue.serverTimestamp(),
-        review_count: review_count || 0,
-        ease_factor: ease_factor || 2.5,
+        deckId,
+        frontContent,
+        backContent,
+        lastReviewedAt:
+          lastReviewedAt || admin.firestore.FieldValue.serverTimestamp(),
+        nextReviewAt:
+          nextReviewAt || admin.firestore.FieldValue.serverTimestamp(),
+        reviewCount: reviewCount || 0,
+        easeFactor: easeFactor || 2.5,
         interval: interval || 1,
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
-        updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
 
       const docRef = await db.collection("Cards").add(newCard);
@@ -145,6 +163,7 @@ export const addCard = onRequest((req, res) => {
     }
   });
 });
+
 export const addStudySession = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {
@@ -152,25 +171,39 @@ export const addStudySession = onRequest((req, res) => {
         return res.status(405).send("Method Not Allowed, use POST");
       }
 
-      const { user_id, deck_id, start_time, end_time, cards_reviewed, total_correct, total_incorrect } = req.body;
+      const {
+        userId,
+        deckId,
+        startTime,
+        endTime,
+        cardsReviewed,
+        totalCorrect,
+        totalIncorrect,
+      } = req.body;
 
-      if (!user_id || !deck_id || !start_time || !end_time || !Array.isArray(cards_reviewed)) {
+      if (
+        !userId ||
+        !deckId ||
+        !startTime ||
+        !endTime ||
+        !Array.isArray(cardsReviewed)
+      ) {
         return res.status(400).send("Bad Request: Missing required fields.");
       }
 
       const newSession = {
-        user_id,
-        deck_id,
-        start_time: admin.firestore.Timestamp.fromDate(new Date(start_time)),
-        end_time: admin.firestore.Timestamp.fromDate(new Date(end_time)),
-        cards_reviewed,
-        total_correct,
-        total_incorrect,
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
+        userId,
+        deckId,
+        startTime: admin.firestore.Timestamp.fromDate(new Date(startTime)),
+        endTime: admin.firestore.Timestamp.fromDate(new Date(endTime)),
+        cardsReviewed,
+        totalCorrect,
+        totalIncorrect,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
       };
 
       const docRef = await db.collection("study_sessions").add(newSession);
-      return res.status(200).send(`Study session created with ID: ${docRef.id}`);
+      return res.status(200).send(`Study session created: ${docRef.id}`);
     } catch (error) {
       console.error("Error adding study session: ", error);
       return res.status(500).send("Internal Server Error");
@@ -178,18 +211,23 @@ export const addStudySession = onRequest((req, res) => {
   });
 });
 
-// Function to get study sessions for a user
 export const getStudySessions = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {
-      const user_id = req.query.user_id as string;
+      const userId = req.query.userId as string;
 
-      if (!user_id) {
-        return res.status(400).send("Bad Request: Missing user_id.");
+      if (!userId) {
+        return res.status(400).send("Bad Request: Missing userId.");
       }
 
-      const querySnapshot = await db.collection("study_sessions").where("user_id", "==", user_id).get();
-      const sessions = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const querySnapshot = await db
+        .collection("study_sessions")
+        .where("userId", "==", userId)
+        .get();
+      const sessions = querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
 
       return res.status(200).json(sessions);
     } catch (error) {
@@ -199,7 +237,6 @@ export const getStudySessions = onRequest((req, res) => {
   });
 });
 
-// Function to add an AI request
 export const addAIRequest = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {
@@ -207,19 +244,19 @@ export const addAIRequest = onRequest((req, res) => {
         return res.status(405).send("Method Not Allowed, use POST");
       }
 
-      const { user_id, input_word, generated_deck_id, status } = req.body;
+      const {userId, inputWord, generatedDeckId, status} = req.body;
 
-      if (!user_id || !input_word || !generated_deck_id || !status) {
+      if (!userId || !inputWord || !generatedDeckId || !status) {
         return res.status(400).send("Bad Request: Missing required fields.");
       }
 
       const newRequest = {
-        user_id,
-        input_word,
-        generated_deck_id,
+        userId,
+        inputWord,
+        generatedDeckId,
         status,
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
-        updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
 
       const docRef = await db.collection("ai_requests").add(newRequest);
@@ -231,7 +268,6 @@ export const addAIRequest = onRequest((req, res) => {
   });
 });
 
-// Function to add a notification
 export const addNotification = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {
@@ -239,19 +275,21 @@ export const addNotification = onRequest((req, res) => {
         return res.status(405).send("Method Not Allowed, use POST");
       }
 
-      const { user_id, type, message, is_read, scheduled_for } = req.body;
+      const {userId, type, message, isRead, scheduledFor} = req.body;
 
-      if (!user_id || !type || !message) {
+      if (!userId || !type || !message) {
         return res.status(400).send("Bad Request: Missing required fields.");
       }
 
       const newNotification = {
-        user_id,
+        userId,
         type,
         message,
-        is_read: is_read || false,
-        scheduled_for: scheduled_for ? admin.firestore.Timestamp.fromDate(new Date(scheduled_for)) : null,
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
+        isRead: isRead || false,
+        scheduledFor: scheduledFor ?
+          admin.firestore.Timestamp.fromDate(new Date(scheduledFor)) :
+          null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
       };
 
       const docRef = await db.collection("notifications").add(newNotification);
@@ -263,7 +301,6 @@ export const addNotification = onRequest((req, res) => {
   });
 });
 
-// Function to add analytics data
 export const addAnalytics = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {
@@ -271,21 +308,21 @@ export const addAnalytics = onRequest((req, res) => {
         return res.status(405).send("Method Not Allowed, use POST");
       }
 
-      const { user_id, data } = req.body;
+      const {userId, data} = req.body;
 
-      if (!user_id || !Array.isArray(data)) {
+      if (!userId || !Array.isArray(data)) {
         return res.status(400).send("Bad Request: Missing required fields.");
       }
 
       const newAnalytics = {
-        user_id,
+        userId,
         data,
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
-        updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
 
       const docRef = await db.collection("analytics").add(newAnalytics);
-      return res.status(200).send(`Analytics data created with ID: ${docRef.id}`);
+      return res.status(200).send(`Analytics data created: ${docRef.id}`);
     } catch (error) {
       console.error("Error adding analytics data: ", error);
       return res.status(500).send("Internal Server Error");
@@ -293,7 +330,6 @@ export const addAnalytics = onRequest((req, res) => {
   });
 });
 
-// Function to add a shared deck
 export const addSharedDeck = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {
@@ -301,18 +337,28 @@ export const addSharedDeck = onRequest((req, res) => {
         return res.status(405).send("Method Not Allowed, use POST");
       }
 
-      const { deck_id, shared_by_user_id, shared_to_user_ids, access_level } = req.body;
+      const {
+        deckId,
+        sharedByUserId,
+        sharedToUserIds,
+        accessLevel,
+      } = req.body;
 
-      if (!deck_id || !shared_by_user_id || !Array.isArray(shared_to_user_ids) || !access_level) {
+      if (
+        !deckId ||
+        !sharedByUserId ||
+        !Array.isArray(sharedToUserIds) ||
+        !accessLevel
+      ) {
         return res.status(400).send("Bad Request: Missing required fields.");
       }
 
       const newSharedDeck = {
-        deck_id,
-        shared_by_user_id,
-        shared_to_user_ids,
-        access_level,
-        shared_at: admin.firestore.FieldValue.serverTimestamp(),
+        deckId,
+        sharedByUserId,
+        sharedToUserIds,
+        accessLevel,
+        sharedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
 
       const docRef = await db.collection("shared_decks").add(newSharedDeck);
@@ -323,4 +369,3 @@ export const addSharedDeck = onRequest((req, res) => {
     }
   });
 });
-

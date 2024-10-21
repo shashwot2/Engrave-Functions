@@ -1,6 +1,8 @@
 import {onRequest} from "firebase-functions/v2/https";
 import * as cors from "cors";
 import * as admin from "firebase-admin";
+import { Groq } from "groq";
+import { Card } from "./Card";
 
 admin.initializeApp({
   credential: admin.credential.applicationDefault(),
@@ -9,6 +11,24 @@ admin.initializeApp({
 
 const db = admin.firestore();
 const corsHandler = cors({origin: true});
+
+async function getSentence(language: string, word: string): Promise<string> {
+  const client = new Groq({
+    apiKey: "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",
+  });
+
+  const chatCompletion = await client.chat.completions.create({
+    messages: [
+      {
+        role: "user",
+        content: `Please provide exactly one simple and concise sentence in '${language}' that includes the word '${word}'. Ensure the sentence is easy to understand and does not contain any extra explanations or examples.`,
+      },
+    ],
+    model: "llama3-8b-8192",
+  });
+
+  return chatCompletion.choices[0].message.content;
+}
 
 export const addDocument = onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -126,36 +146,29 @@ export const addCard = onRequest((req, res) => {
       }
 
       const {
+        userId,
         deckId,
-        frontContent,
-        backContent,
-        lastReviewedAt,
-        nextReviewAt,
-        reviewCount,
-        easeFactor,
-        interval,
+        word,
+        language,
       } = req.body;
 
-      if (!deckId || !frontContent || !backContent) {
+      if (!deckId || !word || !language || !userId) {
         return res.status(400).send("Bad Request: Missing required fields.");
       }
 
-      const newCard = {
-        deckId,
-        frontContent,
-        backContent,
-        lastReviewedAt:
-          lastReviewedAt || admin.firestore.FieldValue.serverTimestamp(),
-        nextReviewAt:
-          nextReviewAt || admin.firestore.FieldValue.serverTimestamp(),
-        reviewCount: reviewCount || 0,
-        easeFactor: easeFactor || 2.5,
-        interval: interval || 1,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      };
+      const sentence = await getSentence(language, word);
+      const newCard = new Card(deckId, word, language, sentence);
 
-      const docRef = await db.collection("Cards").add(newCard);
+      const docRef = await db.collection(userId).doc(deckId).add({
+        deckId: newCard.deckId,
+        word: newCard.word,
+        sentence: newCard.sentence,
+        language: newCard.language,
+        level: newCard.level,
+        createdAt: newCard.createdAt,
+        nextReviewAt: newCard.nextReviewAt,
+        lastReviewedAt: newCard.lastReviewedAt,
+      })
       return res.status(200).send(`Card created with ID: ${docRef.id}`);
     } catch (error) {
       console.error("Error adding card: ", error);
@@ -163,6 +176,7 @@ export const addCard = onRequest((req, res) => {
     }
   });
 });
+
 
 export const addStudySession = onRequest((req, res) => {
   corsHandler(req, res, async () => {

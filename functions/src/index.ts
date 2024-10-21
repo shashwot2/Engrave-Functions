@@ -1,7 +1,7 @@
 import {onRequest} from "firebase-functions/v2/https";
 import * as cors from "cors";
 import * as admin from "firebase-admin";
-import { Groq } from "groq";
+import { Groq } from "groq-sdk";
 import { Card } from "./Card";
 
 admin.initializeApp({
@@ -26,8 +26,7 @@ async function getSentence(language: string, word: string): Promise<string> {
     ],
     model: "llama3-8b-8192",
   });
-
-  return chatCompletion.choices[0].message.content;
+  return chatCompletion.choices[0].message.content ?? "";
 }
 
 export const addDocument = onRequest((req, res) => {
@@ -159,7 +158,7 @@ export const addCard = onRequest((req, res) => {
       const sentence = await getSentence(language, word);
       const newCard = new Card(deckId, word, language, sentence);
 
-      const docRef = await db.collection(userId).doc(deckId).add({
+      const docRef = await db.collection(userId).doc(deckId).collection(newCard.word).add({
         deckId: newCard.deckId,
         word: newCard.word,
         sentence: newCard.sentence,

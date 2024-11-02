@@ -382,3 +382,75 @@ export const addSharedDeck = onRequest((req, res) => {
     }
   });
 });
+
+function getAddDays(level: number): number {
+  if (level === 1) {
+    return 1;
+  } else if (level === 2) {
+    return 7;
+  } else if (level === 3) {
+    return 16;
+  } else if (level === 4) {
+    return 35;
+  } else {
+    level += 1;
+    return 2 * getAddDays(level - 1)
+  }
+}
+
+export const updateCard = onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    try {
+      if (req.method !== "POST") {
+        return res.status(405).send("Method Not Allowed, use POST");
+      }
+      const {
+        userId,
+        deckId,
+        word
+      } = req.body;
+
+      if (
+        !userId ||
+        !deckId ||
+        !word
+      ) {
+        return res.status(400).send("Bad Request: Missing required fields.");
+      }
+      const userRef = db.collection(userId);
+      if (!userRef) {
+        return res.status(404).send("User not found");
+      }
+      const deckRef = userRef.doc(deckId);
+      if (!deckRef) {
+        return res.status(404).send("Deck not found");
+      }
+      const deckSnap = await deckRef.get();
+      const deck = deckSnap.data();
+      const TargetCard = deck?.[word];
+      if (!TargetCard) {
+        return res.status(404).send("Card not found");
+      }
+      const now = new Date();
+      const nextReviewAt = new Date(now.setDate(now.getDate() + getAddDays(TargetCard.level)));
+      const lastReviewedAt = now
+      const level = TargetCard.level + 1;
+      const sentence = await getSentence(TargetCard.language, TargetCard.word);
+      const updateCard = {
+        deckId: TargetCard.deckId,
+        word: TargetCard.word,
+        sentence: sentence,
+        language: TargetCard.language,
+        level: level,
+        createdAt: TargetCard.createdAt,
+        nextReviewAt: nextReviewAt,
+        lastReviewedAt: lastReviewedAt,
+      };
+      await userRef.doc(deckId).collection(word).doc().set(updateCard);
+      return res.status(200).send(`Card updated`);
+    } catch (error) {
+      console.error("Error updating card: ", error);
+      return res.status(500).send("Internal Server Error");
+    }
+  });
+});

@@ -1,8 +1,8 @@
 import {onRequest} from "firebase-functions/v2/https";
 import * as cors from "cors";
 import * as admin from "firebase-admin";
-import { Groq } from "groq-sdk";
-import { Card } from "./Card";
+import {Groq} from "groq-sdk";
+import {Card} from "./Card";
 
 admin.initializeApp({
   credential: admin.credential.applicationDefault(),
@@ -12,6 +12,13 @@ admin.initializeApp({
 const db = admin.firestore();
 const corsHandler = cors({origin: true});
 
+
+/**
+ * Retrieves a sentence containing the specified word in the given language.
+ * @param {string} language - The language of the sentence.
+ * @param {string} word - The word to include in the sentence.
+ * @return {Promise<string>} A promise that resolves to the generated sentence.
+ */
 async function getSentence(language: string, word: string): Promise<string> {
   const client = new Groq({
     apiKey: "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",
@@ -21,7 +28,10 @@ async function getSentence(language: string, word: string): Promise<string> {
     messages: [
       {
         role: "user",
-        content: `Please provide exactly one simple and concise sentence in '${language}' that includes the word '${word}'. Ensure the sentence is easy to understand and does not contain any extra explanations or examples.`,
+        content: `Please provide exactly one simple and concise sentence in 
+        '${language}' that includes the word '${word}'. Ensure the sentence 
+        is easy to understand and does not contain any extra explanations 
+        or examples.`,
       },
     ],
     model: "llama3-8b-8192",
@@ -158,16 +168,17 @@ export const addCard = onRequest((req, res) => {
       const sentence = await getSentence(language, word);
       const newCard = new Card(deckId, word, language, sentence);
 
-      const docRef = await db.collection(userId).doc(deckId).collection(newCard.word).add({
-        deckId: newCard.deckId,
-        word: newCard.word,
-        sentence: newCard.sentence,
-        language: newCard.language,
-        level: newCard.level,
-        createdAt: newCard.createdAt,
-        nextReviewAt: newCard.nextReviewAt,
-        lastReviewedAt: newCard.lastReviewedAt,
-      })
+      const docRef = await db.collection(userId).doc(deckId).
+        collection(newCard.word).add({
+          deckId: newCard.deckId,
+          word: newCard.word,
+          sentence: newCard.sentence,
+          language: newCard.language,
+          level: newCard.level,
+          createdAt: newCard.createdAt,
+          nextReviewAt: newCard.nextReviewAt,
+          lastReviewedAt: newCard.lastReviewedAt,
+        });
       return res.status(200).send(`Card created with ID: ${docRef.id}`);
     } catch (error) {
       console.error("Error adding card: ", error);
@@ -383,6 +394,11 @@ export const addSharedDeck = onRequest((req, res) => {
   });
 });
 
+/**
+ * Retrieves a sentence containing the specified word in the given language.
+ * @param {number} level - The language of the sentence.
+ * @return {number} A promise that resolves to the generated sentence.
+ */
 function getAddDays(level: number): number {
   if (level === 1) {
     return 1;
@@ -394,7 +410,7 @@ function getAddDays(level: number): number {
     return 35;
   } else {
     level += 1;
-    return 2 * getAddDays(level - 1)
+    return 2 * getAddDays(level - 1);
   }
 }
 
@@ -407,7 +423,7 @@ export const updateCard = onRequest((req, res) => {
       const {
         userId,
         deckId,
-        word
+        word,
       } = req.body;
 
       if (
@@ -432,8 +448,9 @@ export const updateCard = onRequest((req, res) => {
         return res.status(404).send("Card not found");
       }
       const now = new Date();
-      const nextReviewAt = new Date(now.setDate(now.getDate() + getAddDays(TargetCard.level)));
-      const lastReviewedAt = now
+      const nextReviewAt = new Date(now.setDate(now.getDate() +
+      getAddDays(TargetCard.level)));
+      const lastReviewedAt = now;
       const level = TargetCard.level + 1;
       const sentence = await getSentence(TargetCard.language, TargetCard.word);
       const updateCard = {
@@ -447,7 +464,7 @@ export const updateCard = onRequest((req, res) => {
         lastReviewedAt: lastReviewedAt,
       };
       await userRef.doc(deckId).collection(word).doc().set(updateCard);
-      return res.status(200).send(`Card updated`);
+      return res.status(200).send("Card updated");
     } catch (error) {
       console.error("Error updating card: ", error);
       return res.status(500).send("Internal Server Error");

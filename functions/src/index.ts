@@ -118,6 +118,33 @@ export const saveOrUpdateUserPreferences = functions.https.onCall(
     }
   }
 );
+export const checkUserPreferences = functions.https.onCall(
+  async (request: CallableRequest<void>) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError("unauthenticated",
+        "The request does not have valid authentication.");
+    }
+
+    const uid = request.auth.uid;
+
+    try {
+      const userPrefDocRef = db.collection("userPreferences").doc(uid);
+      const docSnapshot = await userPrefDocRef.get();
+
+      if (docSnapshot.exists) {
+        // Preferences exist
+        return {preferences: docSnapshot.data(), exists: true};
+      } else {
+        // Preferences do not exist
+        return {message: "No preferences set.", exists: false};
+      }
+    } catch (error) {
+      console.error("Error checking preferences:", error);
+      throw new functions.https.HttpsError("internal",
+        "Error checking preferences.");
+    }
+  }
+);
 export const addDeck = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {

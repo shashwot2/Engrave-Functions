@@ -1,4 +1,5 @@
-import {onRequest} from "firebase-functions/v2/https";
+import {CallableRequest, onRequest} from "firebase-functions/v2/https";
+import * as functions from 'firebase-functions';
 import * as cors from "cors";
 import * as admin from "firebase-admin";
 
@@ -6,6 +7,18 @@ admin.initializeApp({
   credential: admin.credential.applicationDefault(),
   projectId: "isrs-564a5",
 });
+
+interface UserPreferences {
+  motivation?: string;
+  proficiencyLevel?: string;
+  learningStyle?: string;
+  studyPattern?: string;
+  notifications?: boolean;
+}
+interface SavePreferencesData {
+  preferences: UserPreferences;
+}
+
 
 const db = admin.firestore();
 const corsHandler = cors({origin: true});
@@ -76,7 +89,32 @@ export const getDecks = onRequest((req, res) => {
   });
 });
 
-export const addDeck = onRequest((req, res) => {
+export const saveOrUpdateUserPreferences = functions.https.onCall(
+  async (request: CallableRequest<SavePreferencesData>) => {
+    const data = request.data;
+    
+    // Check if the request is authenticated
+    if (!request.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'The request does not have valid authentication.');
+    }
+
+    const uid = request.auth.uid;
+    const preferences = data.preferences;
+
+    try {
+      // Reference to the user's preferences document
+      const userPrefDocRef = db.collection('userPreferences').doc(uid);
+
+      // Merge new data with existing data, creating or updating as needed
+      await userPrefDocRef.set(preferences, { merge: true });
+
+      return { message: 'Preferences saved or updated successfully.' };
+    } catch (error) {
+      console.error('Error saving or updating preferences:', error);
+      throw new functions.https.HttpsError('internal', 'Error saving or updating preferences.');
+    }
+  }
+);export const addDeck = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {
       if (req.method !== "POST") {

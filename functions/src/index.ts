@@ -1,4 +1,5 @@
-import {onRequest} from "firebase-functions/v2/https";
+import {CallableRequest, onRequest} from "firebase-functions/v2/https";
+import * as functions from "firebase-functions";
 import * as cors from "cors";
 import * as admin from "firebase-admin";
 import {Groq} from "groq-sdk";
@@ -8,6 +9,18 @@ admin.initializeApp({
   credential: admin.credential.applicationDefault(),
   projectId: "isrs-564a5",
 });
+
+interface UserPreferences {
+  motivation?: string;
+  proficiencyLevel?: string;
+  learningStyle?: string;
+  studyPattern?: string;
+  notifications?: boolean;
+}
+interface SavePreferencesData {
+  preferences: UserPreferences;
+}
+
 
 const db = admin.firestore();
 const corsHandler = cors({origin: true});
@@ -71,81 +84,239 @@ export const addDocument = onRequest((req, res) => {
   });
 });
 
-export const getDecks = onRequest((req, res) => {
-  corsHandler(req, res, async () => {
+
+export const initDeck = functions.https.onCall(
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The user must be authenticated to initialize a deck."
+      );
+    }
+
+    const userId = request.auth.uid;
+
     try {
-      if (req.method !== "GET") {
-        return res.status(405).send("Method Not Allowed, use GET");
-      }
+      console.log(`Initializing deck for user: ${userId}`);
 
-      const deckId = req.query.deckId as string;
+      // Initialize an empty deck for the user
+      const deckRef = db.collection("Deck").doc(); // Auto-generate document ID
+      await deckRef.set({
+        userId,
+        cards: [], // Empty array for cards
+        creationDate: admin.firestore.FieldValue.serverTimestamp(),
+        deckName: "",
+      });
 
+      console.log(`Deck initialized with ID: ${deckRef.id}`);
+      return {success: true, deckId: deckRef.id};
+    } catch (error) {
+      console.error("Error initializing deck:", error);
+      throw new functions.https.HttpsError("internal", "Failed to initialize deck.");
+    }
+  }
+);
+export const getDecks = functions.https.onCall(
+  async (request: functions.https.CallableRequest) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The user must be authenticated to access this function."
+      );
+    }
+
+    const userId = request.auth.uid;
+
+    const deckId = request.data?.deckId; // Safely access deckId
+    console.log("deckId:", deckId);
+
+    try {
       if (deckId) {
+        console.log("Fetching specific deck:", deckId);
         const docRef = db.collection("Deck").doc(deckId);
         const docSnapshot = await docRef.get();
 
         if (!docSnapshot.exists) {
-          return res.status(404).send("Deck not found");
+          throw new functions.https.HttpsError("not-found", "Deck not found");
         }
 
-        return res.status(200).json(docSnapshot.data());
+        const deckData = docSnapshot.data();
+        if (deckData?.userId !== userId) {
+          throw new functions.https.HttpsError("permission-denied", "Forbidden");
+        }
+
+        return deckData;
       }
 
-      const querySnapshot = await db.collection("Deck").get();
+      console.log("Fetching all decks for user:", userId);
+
+      const querySnapshot = await db.collection("Deck")
+        .where("userId", "==", userId).get();
+
       const decks = querySnapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
 
-      return res.status(200).json(decks);
+      return decks;
     } catch (error) {
-      console.error("Error retrieving decks: ", error);
-      return res.status(500).send("Internal Server Error");
+      console.error("Error retrieving decks:", error);
+      throw new functions.https.HttpsError("internal", "Error retrieving decks");
     }
-  });
-});
+  }
+);
 
-export const addDeck = onRequest((req, res) => {
-  corsHandler(req, res, async () => {
+export const saveOrUpdateUserPreferences = functions.https.onCall(
+  async (request: CallableRequest<SavePreferencesData>) => {
+    const data = request.data;
+
+    // Check if the request is authenticated
+    if (!request.auth) {
+      throw new functions.https.HttpsError("unauthenticated",
+        "The request does not have valid authentication.");
+    }
+
+    const uid = request.auth.uid;
+    const preferences = data.preferences;
+
     try {
-      if (req.method !== "POST") {
-        return res.status(405).send("Method Not Allowed, use POST");
-      }
+      // Reference to the user's preferences document
+      const userPrefDocRef = db.collection("userPreferences").doc(uid);
 
-      const {
-        userId,
-        name,
-        description,
-        tags,
-        isShared,
-        sharedWith,
-        isAiGenerated,
-      } = req.body;
+      // Merge new data with existing data, creating or updating as needed
+      await userPrefDocRef.set(preferences, {merge: true});
 
-      if (!userId || !name || !description || !Array.isArray(tags)) {
-        return res.status(400).send("Bad Request: Missing required fields.");
-      }
-
-      const newDeck = {
-        userId,
-        name,
-        description,
-        tags,
-        isShared: isShared || false,
-        sharedWith: sharedWith || [],
-        isAiGenerated: isAiGenerated || false,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      };
-
-      const docRef = await db.collection("Deck").add(newDeck);
-      return res.status(200).send(`Deck created with ID: ${docRef.id}`);
+      return {message: "Preferences saved or updated successfully."};
     } catch (error) {
-      console.error("Error adding deck: ", error);
-      return res.status(500).send("Internal Server Error");
+      console.error("Error saving or updating preferences:",
+        error);
+      throw new functions.https.HttpsError("internal",
+        "Error saving or updating preferences.");
     }
-  });
-});
+  }
+);
+export const checkUserPreferences = functions.https.onCall(
+  async (request: CallableRequest<void>) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError("unauthenticated",
+        "The request does not have valid authentication.");
+    }
+
+    const uid = request.auth.uid;
+
+    try {
+      const userPrefDocRef = db.collection("userPreferences").doc(uid);
+      const docSnapshot = await userPrefDocRef.get();
+
+      if (docSnapshot.exists) {
+        // Preferences exist
+        return {preferences: docSnapshot.data(), exists: true};
+      } else {
+        // Preferences do not exist
+        return {message: "No preferences set.", exists: false};
+      }
+    } catch (error) {
+      console.error("Error checking preferences:", error);
+      throw new functions.https.HttpsError("internal",
+        "Error checking preferences.");
+    }
+  }
+);
+
+export const addDeck = functions.https.onCall(
+  async (request: functions.https.CallableRequest) => {
+    // Verify user is authenticated
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The user must be authenticated to access this function."
+      );
+    }
+
+    const userId = request.auth.uid;
+
+    // Extract required fields from the request
+    const {
+      deckName,
+      description,
+      tags,
+      isShared = false,
+      sharedWith = [],
+      isAiGenerated = false,
+      cards = [],
+    } = request.data;
+
+    // Validate required fields
+    if (!deckName || !description || !Array.isArray(tags)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Missing or invalid required fields: 'name', 'description', or 'tags'."
+      );
+    }
+
+    // Construct the new deck object
+    const newDeck = {
+      userId,
+      deckName,
+      description,
+      tags,
+      isShared,
+      sharedWith,
+      isAiGenerated,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      cards,
+    };
+
+    try {
+      // Add the new deck to the database
+      const docRef = await db.collection("Deck").add(newDeck);
+      console.log("Deck created with ID:", docRef.id);
+
+      // Return the newly created deck ID to the client
+      return {id: docRef.id};
+    } catch (error) {
+      console.error("Error adding deck:", error);
+      throw new functions.https.HttpsError(
+        "internal",
+        "An error occurred while adding the deck."
+      );
+    }
+  }
+);
+
+export const getCards = functions.https.onCall(
+  async (request: functions.https.CallableRequest) => {
+    // Ensure user is authenticated
+    if (!request.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const userId = request.auth.uid;
+    const deckId = request.data?.deckId;
+
+    try {
+      // Fetch deck and check if user has access
+      const deckRef = db.collection("Deck").doc(deckId);
+      const docSnapshot = await deckRef.get();
+
+      if (!docSnapshot.exists) {
+        throw new functions.https.HttpsError("not-found", "Deck not found.");
+      }
+
+      const deckData = docSnapshot.data();
+      if (deckData?.userId !== userId) {
+        throw new functions.https.HttpsError("permission-denied", "No permission");
+      }
+      // Return the cards from the deck
+      return {cards: deckData?.cards || []};
+    } catch (error) {
+      console.error("Error fetching cards:", error);
+      throw new functions.https.HttpsError("internal", "Failed to retrieve cards.");
+    }
+  }
+);
+
 
 export const addCard = onRequest((req, res) => {
   corsHandler(req, res, async () => {

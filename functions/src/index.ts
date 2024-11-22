@@ -55,39 +55,87 @@ export const addDocument = onRequest((req, res) => {
   });
 });
 
-export const getDecks = onRequest((req, res) => {
-  corsHandler(req, res, async () => {
+
+export const initDeck = functions.https.onCall(
+  async (request) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The user must be authenticated to initialize a deck."
+      );
+    }
+
+    const userId = request.auth.uid;
+
     try {
-      if (req.method !== "GET") {
-        return res.status(405).send("Method Not Allowed, use GET");
-      }
+      console.log(`Initializing deck for user: ${userId}`);
 
-      const deckId = req.query.deckId as string;
+      // Initialize an empty deck for the user
+      const deckRef = db.collection("Deck").doc(); // Auto-generate document ID
+      await deckRef.set({
+        userId,
+        cards: [], // Empty array for cards
+        creationDate: admin.firestore.FieldValue.serverTimestamp(),
+        deckName: "",
+      });
 
+      console.log(`Deck initialized with ID: ${deckRef.id}`);
+      return {success: true, deckId: deckRef.id};
+    } catch (error) {
+      console.error("Error initializing deck:", error);
+      throw new functions.https.HttpsError("internal", "Failed to initialize deck.");
+    }
+  }
+);
+export const getDecks = functions.https.onCall(
+  async (request: functions.https.CallableRequest) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The user must be authenticated to access this function."
+      );
+    }
+
+    const userId = request.auth.uid;
+
+    const deckId = request.data?.deckId; // Safely access deckId
+    console.log("deckId:", deckId);
+
+    try {
       if (deckId) {
+        console.log("Fetching specific deck:", deckId);
         const docRef = db.collection("Deck").doc(deckId);
         const docSnapshot = await docRef.get();
 
         if (!docSnapshot.exists) {
-          return res.status(404).send("Deck not found");
+          throw new functions.https.HttpsError("not-found", "Deck not found");
         }
 
-        return res.status(200).json(docSnapshot.data());
+        const deckData = docSnapshot.data();
+        if (deckData?.userId !== userId) {
+          throw new functions.https.HttpsError("permission-denied", "Forbidden");
+        }
+
+        return deckData;
       }
 
-      const querySnapshot = await db.collection("Deck").get();
+      console.log("Fetching all decks for user:", userId);
+
+      const querySnapshot = await db.collection("Deck")
+        .where("userId", "==", userId).get();
+
       const decks = querySnapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
 
-      return res.status(200).json(decks);
+      return decks;
     } catch (error) {
-      console.error("Error retrieving decks: ", error);
-      return res.status(500).send("Internal Server Error");
+      console.error("Error retrieving decks:", error);
+      throw new functions.https.HttpsError("internal", "Error retrieving decks");
     }
-  });
-});
+  }
+);
 
 export const saveOrUpdateUserPreferences = functions.https.onCall(
   async (request: CallableRequest<SavePreferencesData>) => {

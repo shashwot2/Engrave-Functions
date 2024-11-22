@@ -2,12 +2,8 @@ import {CallableRequest, onRequest} from "firebase-functions/v2/https";
 import * as functions from "firebase-functions";
 import * as cors from "cors";
 import * as admin from "firebase-admin";
-<<<<<<< HEAD
-import {Groq} from "groq-sdk";
-=======
-import { Groq } from "groq-sdk";
-import { Card } from "./Card";
->>>>>>> parent of eb95e28 (deployed)
+import {Groq} from "groq-js";
+import {Card} from "./Card";
 
 admin.initializeApp({
   credential: admin.credential.applicationDefault(),
@@ -328,11 +324,6 @@ export const getCards = functions.https.onCall(
       if (deckData?.userId !== userId) {
         throw new functions.https.HttpsError("permission-denied", "No permission");
       }
-<<<<<<< HEAD
-      // Return the cards from the deck
-      return {cards: deckData?.cards || []};
-=======
-
       const sentence = await getSentence(language, word);
       const newCard = new Card(deckId, word, language, sentence);
 
@@ -347,7 +338,6 @@ export const getCards = functions.https.onCall(
         lastReviewedAt: newCard.lastReviewedAt,
       })
       return res.status(200).send(`Card created with ID: ${docRef.id}`);
->>>>>>> parent of eb95e28 (deployed)
     } catch (error) {
       console.error("Error fetching cards:", error);
       throw new functions.https.HttpsError("internal", "Failed to retrieve cards.");

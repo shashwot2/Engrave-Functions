@@ -2,6 +2,7 @@ import {CallableRequest, onRequest} from "firebase-functions/v2/https";
 import * as functions from "firebase-functions";
 import * as cors from "cors";
 import * as admin from "firebase-admin";
+import {Groq} from "groq-sdk";
 
 admin.initializeApp({
   credential: admin.credential.applicationDefault(),
@@ -22,6 +23,56 @@ interface SavePreferencesData {
 
 const db = admin.firestore();
 const corsHandler = cors({origin: true});
+
+
+/**
+ * Retrieves a random word from the Words API.
+ * @param {string} language - The language of the word to retrieve.
+ * @param {string} word - The word to include in the sentence.
+ * @return {Promise<string>} A promise that resolves to a random word.
+ * */
+async function getSentence(language: string, word: string): Promise<string> {
+  const client = new Groq({
+    apiKey: "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",
+  });
+
+  const chatCompletion = await client.chat.completions.create({
+    messages: [
+      {
+        role: "user",
+        content: `Please provide exactly one simple and concise sentence in 
+        '${language}' that includes the word '${word}'. Ensure the sentence 
+        is easy to understand and does not contain any extra explanations or examples.`,
+      },
+    ],
+    model: "llama3-8b-8192",
+  });
+  return chatCompletion.choices[0].message.content ?? "";
+}
+
+/**
+ * Translates the given text from the source language to the target language.
+ * @param {string} text - The text to translate.
+ * @param {string} source - The source language of the text.
+ * @param {string} target - The target language to translate the text to.
+ *  @return {Promise<string>} A promise that resolves to the translated text.
+ * */
+async function translateText(text: string, source: string, target: string):
+Promise<string> {
+  const client = new Groq({
+    apiKey: "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",
+  });
+  const chatCompletion = await client.chat.completions.create({
+    messages: [
+      {
+        role: "user",
+        content: `Please translate the word from '${source}' to '${target}': ${text}`,
+      },
+    ],
+    model: "llama3-8b-8192",
+  });
+  return chatCompletion.choices[0].message.content ?? "";
+}
 
 export const addDocument = onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -289,51 +340,81 @@ export const getCards = functions.https.onCall(
 );
 
 
-export const addCard = onRequest((req, res) => {
-  corsHandler(req, res, async () => {
+export const addCard = functions.https.onCall(
+  async (request: functions.https.CallableRequest) => {
+    // Ensure user is authenticated
+    if (!request.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Auth required.");
+    }
+
+    const userId = request.auth.uid;
+    const deckId = request.data?.deckId;
+    const answerWord = request.data?.answerWord;
+    const language = request.data?.language;
+
+    // Validate the card data
+    if (!deckId || !answerWord || !language) {
+      throw new functions.https.HttpsError("invalid-argument", "Missing required field.");
+    }
+
+    // Perform translations and sentence generation
+    let targetWord;
+    let targetSentence;
+    let answerSentence;
     try {
-      if (req.method !== "POST") {
-        return res.status(405).send("Method Not Allowed, use POST");
+      targetWord = await translateText(
+        answerWord, language, "English");
+      targetSentence = await getSentence(
+        language, targetWord);
+      answerSentence = await translateText(
+        targetSentence, "English", language);
+    } catch (error) {
+      console.error(
+        "Error during translation or sentence generation:", error);
+      throw new functions.https.HttpsError("internal", "Translation failed.");
+    }
+
+    try {
+      // Fetch deck and check if user has access
+      const deckRef = db.collection("Deck").doc(deckId);
+      const docSnapshot = await deckRef.get();
+
+      if (!docSnapshot.exists) {
+        throw new functions.https.HttpsError("not-found", "Deck not found.");
       }
 
-      const {
-        deckId,
-        frontContent,
-        backContent,
-        lastReviewedAt,
-        nextReviewAt,
-        reviewCount,
-        easeFactor,
-        interval,
-      } = req.body;
-
-      if (!deckId || !frontContent || !backContent) {
-        return res.status(400).send("Bad Request: Missing required fields.");
+      const deckData = docSnapshot.data();
+      if (deckData?.userId !== userId) {
+        throw new functions.https.HttpsError("permission-denied", "No permission");
       }
 
+      // Ensure cards field is valid
+      if (!Array.isArray(deckData?.cards)) {
+        throw new functions.https.HttpsError(
+          "failed-precondition", "Deck cards field is not an array.");
+      }
+
+      // Add the card to the deck
       const newCard = {
-        deckId,
-        frontContent,
-        backContent,
-        lastReviewedAt:
-          lastReviewedAt || admin.firestore.FieldValue.serverTimestamp(),
-        nextReviewAt:
-          nextReviewAt || admin.firestore.FieldValue.serverTimestamp(),
-        reviewCount: reviewCount || 0,
-        easeFactor: easeFactor || 2.5,
-        interval: interval || 1,
+        answerWord: answerWord,
+        language: language,
+        targetWord: targetWord,
+        targetSentence: targetSentence,
+        answerSentence: answerSentence,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
 
-      const docRef = await db.collection("Cards").add(newCard);
-      return res.status(200).send(`Card created with ID: ${docRef.id}`);
+      await deckRef.update({
+        cards: admin.firestore.FieldValue.arrayUnion(newCard),
+      });
+
+      return {message: "Card added successfully.", card: newCard};
     } catch (error) {
-      console.error("Error adding card: ", error);
-      return res.status(500).send("Internal Server Error");
+      console.error("Error adding card:", error);
+      throw new functions.https.HttpsError("internal", "Failed to add card.");
     }
-  });
-});
+  }
+);
 
 export const addStudySession = onRequest((req, res) => {
   corsHandler(req, res, async () => {

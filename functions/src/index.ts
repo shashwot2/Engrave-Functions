@@ -256,6 +256,39 @@ export const addDeck = functions.https.onCall(
   }
 );
 
+export const getCards = functions.https.onCall(
+  async (request: functions.https.CallableRequest) => {
+    // Ensure user is authenticated
+    if (!request.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Authentication required.");
+    }
+
+    const userId = request.auth.uid;
+    const deckId = request.data?.deckId;
+
+    try {
+      // Fetch deck and check if user has access
+      const deckRef = db.collection("Deck").doc(deckId);
+      const docSnapshot = await deckRef.get();
+
+      if (!docSnapshot.exists) {
+        throw new functions.https.HttpsError("not-found", "Deck not found.");
+      }
+
+      const deckData = docSnapshot.data();
+      if (deckData?.userId !== userId) {
+        throw new functions.https.HttpsError("permission-denied", "No permission");
+      }
+      // Return the cards from the deck
+      return {cards: deckData?.cards || []};
+    } catch (error) {
+      console.error("Error fetching cards:", error);
+      throw new functions.https.HttpsError("internal", "Failed to retrieve cards.");
+    }
+  }
+);
+
+
 export const addCard = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {

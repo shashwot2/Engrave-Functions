@@ -193,47 +193,68 @@ export const checkUserPreferences = functions.https.onCall(
     }
   }
 );
-export const addDeck = onRequest((req, res) => {
-  corsHandler(req, res, async () => {
-    try {
-      if (req.method !== "POST") {
-        return res.status(405).send("Method Not Allowed, use POST");
-      }
 
-      const {
-        userId,
-        name,
-        description,
-        tags,
-        isShared,
-        sharedWith,
-        isAiGenerated,
-      } = req.body;
-
-      if (!userId || !name || !description || !Array.isArray(tags)) {
-        return res.status(400).send("Bad Request: Missing required fields.");
-      }
-
-      const newDeck = {
-        userId,
-        name,
-        description,
-        tags,
-        isShared: isShared || false,
-        sharedWith: sharedWith || [],
-        isAiGenerated: isAiGenerated || false,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      };
-
-      const docRef = await db.collection("Deck").add(newDeck);
-      return res.status(200).send(`Deck created with ID: ${docRef.id}`);
-    } catch (error) {
-      console.error("Error adding deck: ", error);
-      return res.status(500).send("Internal Server Error");
+export const addDeck = functions.https.onCall(
+  async (request: functions.https.CallableRequest) => {
+    // Verify user is authenticated
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The user must be authenticated to access this function."
+      );
     }
-  });
-});
+
+    const userId = request.auth.uid;
+
+    // Extract required fields from the request
+    const {
+      deckName,
+      description,
+      tags,
+      isShared = false,
+      sharedWith = [],
+      isAiGenerated = false,
+      cards = [],
+    } = request.data;
+
+    // Validate required fields
+    if (!deckName || !description || !Array.isArray(tags)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Missing or invalid required fields: 'name', 'description', or 'tags'."
+      );
+    }
+
+    // Construct the new deck object
+    const newDeck = {
+      userId,
+      deckName,
+      description,
+      tags,
+      isShared,
+      sharedWith,
+      isAiGenerated,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      cards,
+    };
+
+    try {
+      // Add the new deck to the database
+      const docRef = await db.collection("Deck").add(newDeck);
+      console.log("Deck created with ID:", docRef.id);
+
+      // Return the newly created deck ID to the client
+      return {id: docRef.id};
+    } catch (error) {
+      console.error("Error adding deck:", error);
+      throw new functions.https.HttpsError(
+        "internal",
+        "An error occurred while adding the deck."
+      );
+    }
+  }
+);
 
 export const addCard = onRequest((req, res) => {
   corsHandler(req, res, async () => {

@@ -66,7 +66,9 @@ Promise<string> {
     messages: [
       {
         role: "user",
-        content: `Please translate the word from '${source}' to '${target}': ${text}`,
+        content: `You are a translator, translate ${text} from ${source} 
+        to ${target}, pleasejust translate the text, do not 
+        add any extra information.`,
       },
     ],
     model: "llama3-8b-8192",
@@ -344,10 +346,10 @@ export const addCard = functions.https.onCall(
   async (request: functions.https.CallableRequest) => {
     // Ensure user is authenticated
     if (!request.auth) {
-      throw new functions.https.HttpsError("unauthenticated", "Auth required.");
+      throw new functions.https.HttpsError(
+        "invalid-argument", "User must be authenticated.");
     }
-
-    const userId = request.auth.uid;
+    const userId = request.data?.userId;
     const deckId = request.data?.deckId;
     const answerWord = request.data?.answerWord;
     const language = request.data?.language;
@@ -363,11 +365,11 @@ export const addCard = functions.https.onCall(
     let answerSentence;
     try {
       targetWord = await translateText(
-        answerWord, language, "English");
+        answerWord, "English", language);
       targetSentence = await getSentence(
         language, targetWord);
       answerSentence = await translateText(
-        targetSentence, "English", language);
+        targetSentence, language, "English");
     } catch (error) {
       console.error(
         "Error during translation or sentence generation:", error);
@@ -396,12 +398,10 @@ export const addCard = functions.https.onCall(
 
       // Add the card to the deck
       const newCard = {
-        answerWord: answerWord,
-        language: language,
-        targetWord: targetWord,
-        targetSentence: targetSentence,
         answerSentence: answerSentence,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        answerWord: answerWord,
+        targetSentence: targetSentence,
+        targetWord: targetWord,
       };
 
       await deckRef.update({
@@ -411,7 +411,8 @@ export const addCard = functions.https.onCall(
       return {message: "Card added successfully.", card: newCard};
     } catch (error) {
       console.error("Error adding card:", error);
-      throw new functions.https.HttpsError("internal", "Failed to add card.");
+      throw new functions.https.HttpsError(
+        "internal", "Failed to add card." + targetSentence + answerSentence+ targetWord);
     }
   }
 );
@@ -493,7 +494,8 @@ export const addAIRequest = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {
       if (req.method !== "POST") {
-        return res.status(405).send("Method Not Allowed, use POST");
+        return res.status(405).send(
+          "Method Not Allowed, use POST");
       }
 
       const {userId, inputWord, generatedDeckId, status} = req.body;

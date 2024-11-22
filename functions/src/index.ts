@@ -3,7 +3,6 @@ import * as functions from "firebase-functions";
 import * as cors from "cors";
 import * as admin from "firebase-admin";
 import {Groq} from "groq-sdk";
-import {Card} from "./Card";
 
 admin.initializeApp({
   credential: admin.credential.applicationDefault(),
@@ -51,6 +50,32 @@ async function getSentence(language: string, word: string): Promise<string> {
   });
   return chatCompletion.choices[0].message.content ?? "";
 }
+
+/**
+ * Translates the given text from the source language to the target language.
+ * @param {string} text - The text to translate.
+ * @param {string} source - The source language of the text.
+ * @param {string} target - The target language to translate the text to.
+ *  @return {Promise<string>} A promise that resolves to the translated text.
+ * */
+async function translateText(text: string, source: string, target: string):
+Promise<string> {
+  const client = new Groq({
+    apiKey: "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",
+  });
+
+  const chatCompletion = await client.chat.completions.create({
+    messages: [
+      {
+        role: "user",
+        content: `Please translate the word from '${source}' to '${target}': ${text}`,
+      },
+    ],
+    model: "llama3-8b-8192",
+  });
+  return chatCompletion.choices[0].message.content ?? "";
+}
+
 
 export const addDocument = onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -263,7 +288,7 @@ export const addDeck = functions.https.onCall(
       isShared,
       sharedWith,
       isAiGenerated,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: new Date(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       cards,
     };
@@ -318,93 +343,81 @@ export const getCards = functions.https.onCall(
 );
 
 
-export const addCard = onRequest((req, res) => {
-  corsHandler(req, res, async () => {
-    try {
-      if (req.method !== "POST") {
-        return res.status(405).send("Method Not Allowed, use POST");
-      }
-
-      const {
-        userId,
-        deckId,
-        word,
-        language,
-      } = req.body;
-
-      if (!deckId || !word || !language || !userId) {
-        return res.status(400).send("Bad Request: Missing required fields.");
-      }
-
-      const sentence = await getSentence(language, word);
-      const newCard = new Card(deckId, word, language, sentence);
-
-      const docRef = await db.collection(userId).doc(deckId).
-        collection(newCard.word).add({
-          deckId: newCard.deckId,
-          word: newCard.word,
-          sentence: newCard.sentence,
-          language: newCard.language,
-          level: newCard.level,
-          createdAt: newCard.createdAt,
-          nextReviewAt: newCard.nextReviewAt,
-          lastReviewedAt: newCard.lastReviewedAt,
-        });
-      return res.status(200).send(`Card created with ID: ${docRef.id}`);
-    } catch (error) {
-      console.error("Error adding card: ", error);
-      return res.status(500).send("Internal Server Error");
+export const addCard = functions.https.onCall(
+  async (request: functions.https.CallableRequest) => {
+    // Ensure user is authenticated
+    if (!request.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Auth required.");
     }
-  });
-});
 
+    const userId = request.auth.uid;
+    const deckId = request.data?.deckId;
+    const answerWord = request.data?.answerWord;
+    const language = request.data?.language;
 
-export const addStudySession = onRequest((req, res) => {
-  corsHandler(req, res, async () => {
+    // Validate the card data
+    if (!deckId || !answerWord || !language) {
+      throw new functions.https.HttpsError("invalid-argument", "Missing required field.");
+    }
+
+    // Perform translations and sentence generation
+    let targetWord;
+    let targetSentence;
+    let answerSentence;
     try {
-      if (req.method !== "POST") {
-        return res.status(405).send("Method Not Allowed, use POST");
+      targetWord = await translateText(
+        answerWord, language, "English");
+      targetSentence = await getSentence(
+        language, targetWord);
+      answerSentence = await translateText(
+        targetSentence, "English", language);
+    } catch (error) {
+      console.error(
+        "Error during translation or sentence generation:", error);
+      throw new functions.https.HttpsError("internal", "Translation failed.");
+    }
+
+    try {
+      // Fetch deck and check if user has access
+      const deckRef = db.collection("Deck").doc(deckId);
+      const docSnapshot = await deckRef.get();
+
+      if (!docSnapshot.exists) {
+        throw new functions.https.HttpsError("not-found", "Deck not found.");
       }
 
-      const {
-        userId,
-        deckId,
-        startTime,
-        endTime,
-        cardsReviewed,
-        totalCorrect,
-        totalIncorrect,
-      } = req.body;
-
-      if (
-        !userId ||
-        !deckId ||
-        !startTime ||
-        !endTime ||
-        !Array.isArray(cardsReviewed)
-      ) {
-        return res.status(400).send("Bad Request: Missing required fields.");
+      const deckData = docSnapshot.data();
+      if (deckData?.userId !== userId) {
+        throw new functions.https.HttpsError("permission-denied", "No permission");
       }
 
-      const newSession = {
-        userId,
-        deckId,
-        startTime: admin.firestore.Timestamp.fromDate(new Date(startTime)),
-        endTime: admin.firestore.Timestamp.fromDate(new Date(endTime)),
-        cardsReviewed,
-        totalCorrect,
-        totalIncorrect,
+      // Ensure cards field is valid
+      if (!Array.isArray(deckData?.cards)) {
+        throw new functions.https.HttpsError(
+          "failed-precondition", "Deck cards field is not an array.");
+      }
+
+      // Add the card to the deck
+      const newCard = {
+        answerWord: answerWord,
+        language: language,
+        targetWord: targetWord,
+        targetSentence: targetSentence,
+        answerSentence: answerSentence,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       };
 
-      const docRef = await db.collection("study_sessions").add(newSession);
-      return res.status(200).send(`Study session created: ${docRef.id}`);
+      await deckRef.update({
+        cards: admin.firestore.FieldValue.arrayUnion(newCard),
+      });
+
+      return {message: "Card added successfully.", card: newCard};
     } catch (error) {
-      console.error("Error adding study session: ", error);
-      return res.status(500).send("Internal Server Error");
+      console.error("Error adding card:", error);
+      throw new functions.https.HttpsError("internal", "Failed to add card.");
     }
-  });
-});
+  }
+);
 
 export const getStudySessions = onRequest((req, res) => {
   corsHandler(req, res, async () => {

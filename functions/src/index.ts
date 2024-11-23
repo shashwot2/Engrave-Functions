@@ -127,9 +127,14 @@ export const initDeck = functions.https.onCall(
       const deckRef = db.collection("Deck").doc(); // Auto-generate document ID
       await deckRef.set({
         userId,
-        cards: [], // Empty array for cards
-        creationDate: admin.firestore.FieldValue.serverTimestamp(),
         deckName: "",
+        description: "Default Description",
+        tags: ["default"],
+        isShared: false,
+        sharedWith: [],
+        isAiGenerated: false,
+        cards: [], // Empty array for cards
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
       console.log(`Deck initialized with ID: ${deckRef.id}`);
@@ -186,6 +191,110 @@ export const getDecks = functions.https.onCall(
     } catch (error) {
       console.error("Error retrieving decks:", error);
       throw new functions.https.HttpsError("internal", "Error retrieving decks");
+    }
+  }
+);
+
+export const saveDeckProgress = functions.https.onCall(
+  async (
+    request: CallableRequest<{ deckId: string; cardId: string; correct: boolean }>,
+  ) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The user must be authenticated to save progress."
+      );
+    }
+
+    const {deckId, cardId, correct} = request.data;
+
+    if (!deckId || !cardId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Deck ID and Card ID are required."
+      );
+    }
+
+    const userId = request.auth.uid;
+    const progressRef = db.collection("UserProgress").doc(`${userId}_${deckId}`);
+
+    try {
+      // Check if the progress document exists
+      const docSnapshot = await progressRef.get();
+
+      if (docSnapshot.exists) {
+        // Update existing progress document
+        await progressRef.update({
+          results: admin.firestore.FieldValue.arrayUnion({
+            cardId,
+            correct,
+            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+          }),
+        });
+      } else {
+        // Create a new progress document
+        await progressRef.set({
+          userId,
+          deckId,
+          results: [
+            {
+              cardId,
+              correct,
+              timestamp: admin.firestore.FieldValue.serverTimestamp(),
+            },
+          ],
+        });
+      }
+
+      return {success: true, message: "Progress saved successfully."};
+    } catch (error) {
+      console.error("Error saving user progress:", error);
+      throw new functions.https.HttpsError(
+        "internal",
+        "Failed to save user progress."
+      );
+    }
+  }
+);
+
+export const getDeckProgress = functions.https.onCall(
+  async (
+    request: CallableRequest<{ deckId: string }>,
+  ) => {
+    if (!request.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "The user must be authenticated to retrieve progress."
+      );
+    }
+
+    const {deckId} = request.data;
+
+    if (!deckId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Deck ID is required."
+      );
+    }
+
+    const userId = request?.auth?.uid;
+    const progressRef = db.collection("UserProgress").doc(`${userId}_${deckId}`);
+
+    try {
+      const docSnapshot = await progressRef.get();
+
+      if (!docSnapshot.exists) {
+        return {success: false, message: "No progress found for this deck."};
+      }
+
+      const progressData = docSnapshot.data();
+      return {success: true, progress: progressData};
+    } catch (error) {
+      console.error("Error retrieving user progress:", error);
+      throw new functions.https.HttpsError(
+        "internal",
+        "Failed to retrieve user progress."
+      );
     }
   }
 );

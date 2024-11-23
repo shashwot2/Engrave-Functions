@@ -1,4 +1,4 @@
-import { Groq } from "groq-sdk";
+import {Groq} from "groq-sdk";
 
 async function getSentence(language: string, word: string): Promise<string> {
   const client = new Groq({
@@ -9,7 +9,9 @@ async function getSentence(language: string, word: string): Promise<string> {
     messages: [
       {
         role: "user",
-        content: `Please provide exactly one simple and concise sentence in '${language}' that includes the word '${word}'. Ensure the sentence is easy to understand and does not contain any extra explanations or examples.`,
+        content: `Please provide exactly one simple and concise sentence in '${language}' 
+        that includes the word '${word}'. Ensure the sentence is easy to understand
+         and does not contain any extra explanations or examples.`,
       },
     ],
     model: "llama3-8b-8192",

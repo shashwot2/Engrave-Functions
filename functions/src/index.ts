@@ -1,8 +1,8 @@
-import {CallableRequest, onRequest} from "firebase-functions/v2/https";
+import { CallableRequest, onRequest } from "firebase-functions/v2/https";
 import * as functions from "firebase-functions";
 import * as cors from "cors";
 import * as admin from "firebase-admin";
-import {Groq} from "groq-sdk";
+import { Groq } from "groq-sdk";
 const getCurrentTimestamp = () => new Date().toISOString();
 
 admin.initializeApp({
@@ -23,7 +23,7 @@ interface SavePreferencesData {
 
 
 const db = admin.firestore();
-const corsHandler = cors({origin: true});
+const corsHandler = cors({ origin: true });
 
 
 /**
@@ -84,7 +84,7 @@ export const addDocument = onRequest((req, res) => {
         return res.status(405).send("Method Not Allowed, use POST");
       }
 
-      const {deckName, cards, creationDate} = req.body;
+      const { deckName, cards, creationDate } = req.body;
 
       if (!deckName || !Array.isArray(cards) || !creationDate) {
         return res.status(400).send("Bad Request: Missing required fields.");
@@ -139,7 +139,7 @@ export const initDeck = functions.https.onCall(
       });
 
       console.log(`Deck initialized with ID: ${deckRef.id}`);
-      return {success: true, deckId: deckRef.id};
+      return { success: true, deckId: deckRef.id };
     } catch (error) {
       console.error("Error initializing deck:", error);
       throw new functions.https.HttpsError("internal", "Failed to initialize deck.");
@@ -207,7 +207,7 @@ export const saveDeckProgress = functions.https.onCall(
       );
     }
 
-    const {deckId, cardId, correct} = request.data;
+    const { deckId, cardId, correct } = request.data;
 
     if (!deckId || !cardId) {
       throw new functions.https.HttpsError(
@@ -253,7 +253,7 @@ export const saveDeckProgress = functions.https.onCall(
         });
       }
 
-      return {success: true, message: "Progress saved successfully."};
+      return { success: true, message: "Progress saved successfully." };
     } catch (error) {
       console.error("Error saving user progress:", error);
       throw new functions.https.HttpsError(
@@ -274,7 +274,7 @@ export const getDeckProgress = functions.https.onCall(
       );
     }
 
-    const {deckId} = request.data;
+    const { deckId } = request.data;
 
     if (!deckId) {
       throw new functions.https.HttpsError(
@@ -290,11 +290,11 @@ export const getDeckProgress = functions.https.onCall(
       const docSnapshot = await progressRef.get();
 
       if (!docSnapshot.exists) {
-        return {success: false, message: "No progress found for this deck."};
+        return { success: false, message: "No progress found for this deck." };
       }
 
       const progressData = docSnapshot.data();
-      return {success: true, progress: progressData};
+      return { success: true, progress: progressData };
     } catch (error) {
       console.error("Error retrieving user progress:", error);
       throw new functions.https.HttpsError(
@@ -323,9 +323,9 @@ export const saveOrUpdateUserPreferences = functions.https.onCall(
       const userPrefDocRef = db.collection("userPreferences").doc(uid);
 
       // Merge new data with existing data, creating or updating as needed
-      await userPrefDocRef.set(preferences, {merge: true});
+      await userPrefDocRef.set(preferences, { merge: true });
 
-      return {message: "Preferences saved or updated successfully."};
+      return { message: "Preferences saved or updated successfully." };
     } catch (error) {
       console.error("Error saving or updating preferences:",
         error);
@@ -349,10 +349,10 @@ export const checkUserPreferences = functions.https.onCall(
 
       if (docSnapshot.exists) {
         // Preferences exist
-        return {preferences: docSnapshot.data(), exists: true};
+        return { preferences: docSnapshot.data(), exists: true };
       } else {
         // Preferences do not exist
-        return {message: "No preferences set.", exists: false};
+        return { message: "No preferences set.", exists: false };
       }
     } catch (error) {
       console.error("Error checking preferences:", error);
@@ -410,7 +410,7 @@ export const addDeck = functions.https.onCall(
     try {
       const docRef = await db.collection("Deck").add(newDeck);
       console.log("Deck created with ID:", docRef.id);
-      return {id: docRef.id};
+      return { id: docRef.id };
     } catch (error) {
       console.error("Error adding deck:", error);
       throw new functions.https.HttpsError(
@@ -457,7 +457,7 @@ export const getCards = functions.https.onCall(
         });
       }
 
-      return {cards: cardsWithIds};
+      return { cards: cardsWithIds };
     } catch (error) {
       console.error("Error fetching cards:", error);
       throw new functions.https.HttpsError("internal", "Failed to retrieve cards.");
@@ -530,7 +530,7 @@ export const addCard = functions.https.onCall(
         cards: admin.firestore.FieldValue.arrayUnion(newCard),
       });
 
-      return {message: "Card added successfully.", card: newCard};
+      return { message: "Card added successfully.", card: newCard };
     } catch (error) {
       console.error("Error adding card:", error);
       throw new functions.https.HttpsError(
@@ -624,7 +624,7 @@ export const addAIRequest = onRequest((req, res) => {
           "Method Not Allowed, use POST");
       }
 
-      const {userId, inputWord, generatedDeckId, status} = req.body;
+      const { userId, inputWord, generatedDeckId, status } = req.body;
 
       if (!userId || !inputWord || !generatedDeckId || !status) {
         return res.status(400).send("Bad Request: Missing required fields.");
@@ -655,7 +655,7 @@ export const addNotification = onRequest((req, res) => {
         return res.status(405).send("Method Not Allowed, use POST");
       }
 
-      const {userId, type, message, isRead, scheduledFor} = req.body;
+      const { userId, type, message, isRead, scheduledFor } = req.body;
 
       if (!userId || !type || !message) {
         return res.status(400).send("Bad Request: Missing required fields.");
@@ -688,7 +688,7 @@ export const addAnalytics = onRequest((req, res) => {
         return res.status(405).send("Method Not Allowed, use POST");
       }
 
-      const {userId, data} = req.body;
+      const { userId, data } = req.body;
 
       if (!userId || !Array.isArray(data)) {
         return res.status(400).send("Bad Request: Missing required fields.");
@@ -709,6 +709,67 @@ export const addAnalytics = onRequest((req, res) => {
     }
   });
 });
+
+export const saveSelectedLanguage = onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    try {
+      if (req.method !== "POST") {
+        return res.status(405).send("Method Not Allowed, use POST");
+      }
+
+      const { userId, language } = req.body;
+
+      if (!userId || !language) {
+        return res.status(400).send("Bad Request: Missing required fields.");
+      }
+
+      const userRef = db.collection("userSettings").doc(userId);
+      await userRef.set({
+        selectedLanguage: language,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+
+      return res.status(200).json({
+        success: true,
+        language,
+      });
+    } catch (error) {
+      console.error("Error saving language: ", error);
+      return res.status(500).send("Internal Server Error");
+    }
+  });
+});
+
+export const getSelectedLanguage = onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    try {
+      if (req.method !== "GET") {
+        return res.status(405).send("Method Not Allowed, use GET");
+      }
+
+      const userId = req.query.userId as string;
+
+      if (!userId) {
+        return res.status(400).send("Bad Request: Missing userId.");
+      }
+
+      const userRef = db.collection("userSettings").doc(userId);
+      const doc = await userRef.get();
+
+      if (!doc.exists) {
+        return res.status(200).json({ selectedLanguage: null });
+      }
+
+      return res.status(200).json({
+        selectedLanguage: doc.data()?.selectedLanguage || null,
+      });
+    } catch (error) {
+      console.error("Error getting language: ", error);
+      return res.status(500).send("Internal Server Error");
+    }
+  });
+});
+
 
 export const addSharedDeck = onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -749,3 +810,4 @@ export const addSharedDeck = onRequest((req, res) => {
     }
   });
 });
+

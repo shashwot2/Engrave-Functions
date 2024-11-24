@@ -1,4 +1,4 @@
-import {Groq} from "groq-sdk";
+import { Groq } from "groq-sdk";
 
 async function getSentence(language: string, word: string): Promise<string> {
   const client = new Groq({

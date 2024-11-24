@@ -19,4 +19,4 @@ class Card {
     this.lastReviewedAt = now;
   }
 }
-export {Card};
+export { Card };

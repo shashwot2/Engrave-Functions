@@ -32,24 +32,24 @@ const corsHandler = cors({origin: true});
  * @param {string} word - The word to include in the sentence.
  * @return {Promise<string>} A promise that resolves to a random word.
  * */
-async function getSentence(language: string, word: string): Promise<string> {
-  const client = new Groq({
-    apiKey: "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",
-  });
+// async function getSentence(language: string, word: string): Promise<string> {
+//   const client = new Groq({
+//     apiKey: "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",
+//   });
 
-  const chatCompletion = await client.chat.completions.create({
-    messages: [
-      {
-        role: "user",
-        content: `Please provide exactly one simple and concise sentence in 
-        '${language}' that includes the word '${word}'. Ensure the sentence 
-        is easy to understand and does not contain any extra explanations or examples.`,
-      },
-    ],
-    model: "llama3-8b-8192",
-  });
-  return chatCompletion.choices[0].message.content ?? "";
-}
+//   const chatCompletion = await client.chat.completions.create({
+//     messages: [
+//       {
+//         role: "user",
+//         content: `Please provide exactly one simple and concise sentence in
+//         '${language}' that includes the word '${word}'. Ensure the sentence
+//         is easy to understand and does not contain any extra explanations or examples.`,
+//       },
+//     ],
+//     model: "llama3-8b-8192",
+//   });
+//   return chatCompletion.choices[0].message.content ?? "";
+// }
 
 /**
  * Translates the given text from the source language to the target language.
@@ -135,7 +135,7 @@ export const initDeck = functions.https.onCall(
         sharedWith: [],
         isAiGenerated: false,
         cards: [], // Empty array for cards
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: getCurrentTimestamp(),
       });
 
       console.log(`Deck initialized with ID: ${deckRef.id}`);
@@ -464,35 +464,170 @@ export const getCards = functions.https.onCall(
     }
   }
 );
+async function generatePracticeCards(
+  targetWord: string,
+  answerWord: string,
+  language: string,
+  preferences: any
+): Promise<any[]> {
+  const client = new Groq({
+    apiKey: "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",
+  });
 
+  const proficiencyLevel = preferences?.proficiencyLevel || "beginner";
+
+  // Define 5 different scenario types for varied practice
+  const scenarios = [
+    {
+      type: "basic",
+      prompt: `Write only a ${proficiencyLevel} level sentence in ${language} using ${targetWord}. The output should be just the sentence, nothing else.`,
+    },
+    {
+      type: "daily",
+      prompt: `Write only a ${proficiencyLevel} level sentence about daily activities in ${language} using ${targetWord}. Return just the sentence.`,
+    },
+    {
+      type: "social",
+      prompt: `Write only a ${proficiencyLevel} level sentence about social interactions in ${language} using ${targetWord}. Return just the sentence.`,
+    },
+    {
+      type: "question",
+      prompt: `Write only a ${proficiencyLevel} level question in ${language} using ${targetWord}. Return just the question.`,
+    },
+    {
+      type: "response",
+      prompt: `Write only a ${proficiencyLevel} level response in ${language} using ${targetWord}. Return just the response.`,
+    },
+  ];
+
+  // Add context-specific scenarios based on proficiency
+  if (proficiencyLevel === "intermediate") {
+    scenarios.forEach((scenario) => {
+      scenario.prompt += " Include common expressions where appropriate.";
+    });
+  } else if (proficiencyLevel === "advanced") {
+    scenarios.forEach((scenario) => {
+      scenario.prompt += " Use more sophisticated language structures.";
+    });
+  }
+
+  try {
+    // Generate sentences for each scenario
+    const cards = await Promise.all(scenarios.map(async (scenario) => {
+      try {
+        const chatCompletion = await client.chat.completions.create({
+          messages: [
+            {
+              role: "system",
+              content: "You are a language learning assistant. Provide only the requested sentence without any explanations, descriptions, or additional text. The response should be a single sentence in the target language.",
+            },
+            {
+              role: "user",
+              content: scenario.prompt,
+            },
+          ],
+          model: "llama3-8b-8192",
+          temperature: 0.7, // Add some variation but keep it reasonable
+        });
+
+        const targetSentence = chatCompletion.choices[0].message.content?.trim() || "";
+        // Clean up any remaining explanatory text
+        const cleanedSentence = targetSentence
+          .replace(/^(here'?s?|this is|example|\(|\[).*/i, "") //eslint-disable-line
+          .replace(/^[^a-z\u4e00-\u9fff]*/i, "") //eslint-disable-line
+          .replace(/[\(\[\{].*[\)\]\}]/g, "") //eslint-disable-line
+          .trim(); //eslint-disable-line
+
+        const answerSentence = await translateText(cleanedSentence, language, "English");
+
+        return {
+          targetWord,
+          answerWord,
+          targetSentence: cleanedSentence,
+          answerSentence,
+          type: scenario.type,
+          difficulty: proficiencyLevel,
+          context: scenario.type,
+          usage: {
+            category: scenario.type,
+            situation: getContextDescription(scenario.type),
+          },
+        };
+      } catch (error) {
+        console.error(`Error generating card for scenario ${scenario.type}:`, error);
+        return createFallbackCard(targetWord, answerWord, scenario.type);
+      }
+    }));
+
+    return cards.filter((card) => card.targetSentence && card.targetSentence !== targetWord);
+  } catch (error) {
+    console.error("Error in generatePracticeCards:", error);
+    return [createFallbackCard(targetWord, answerWord, "basic")];
+  }
+}
+
+function getContextDescription(type: string): string {
+  switch (type) {
+  case "basic":
+    return "General usage";
+  case "daily":
+    return "Daily activities";
+  case "social":
+    return "Social interactions";
+  case "question":
+    return "Asking questions";
+  case "response":
+    return "Responding to others";
+  default:
+    return "General practice";
+  }
+}
+
+function createFallbackCard(targetWord: string, answerWord: string, type: string) {
+  return {
+    targetWord,
+    answerWord,
+    targetSentence: targetWord,
+    answerSentence: answerWord,
+    type: type || "basic",
+    difficulty: "beginner",
+    context: "fallback",
+    usage: {
+      category: type,
+      situation: "Basic practice",
+    },
+  };
+}
 export const addCard = functions.https.onCall(
   async (request: functions.https.CallableRequest) => {
     if (!request.auth) {
       throw new functions.https.HttpsError(
         "invalid-argument", "User must be authenticated.");
     }
+
     const userId = request.data?.userId;
     const deckId = request.data?.deckId;
     const answerWord = request.data?.answerWord;
     const language = request.data?.language;
+    const preferences = request.data?.preferences;
 
     if (!deckId || !answerWord || !language) {
       throw new functions.https.HttpsError("invalid-argument", "Missing required field.");
     }
 
-    let targetWord;
-    let targetSentence;
-    let answerSentence;
     try {
-      targetWord = await translateText(answerWord, "English", language);
-      targetSentence = await getSentence(language, targetWord);
-      answerSentence = await translateText(targetSentence, language, "English");
-    } catch (error) {
-      console.error("Error during translation or sentence generation:", error);
-      throw new functions.https.HttpsError("internal", "Translation failed.");
-    }
+      // Translate the base word
+      const targetWord = await translateText(answerWord, "English", language);
 
-    try {
+      // Generate multiple practice scenarios
+      const practiceCards = await generatePracticeCards(
+        targetWord,
+        answerWord,
+        language,
+        preferences
+      );
+
+      // Get deck reference and validate
       const deckRef = db.collection("Deck").doc(deckId);
       const docSnapshot = await deckRef.get();
 
@@ -501,43 +636,45 @@ export const addCard = functions.https.onCall(
       }
 
       const deckData = docSnapshot.data();
-      if (!deckData) {
-        throw new functions.https.HttpsError("not-found", "Deck data is empty.");
-      }
-
-      if (deckData.userId !== userId) {
-        throw new functions.https.HttpsError("permission-denied", "No permission");
-      }
-
-      if (!Array.isArray(deckData.cards)) {
+      if (!deckData || deckData.userId !== userId) {
         throw new functions.https.HttpsError(
-          "failed-precondition", "Deck cards field is not an array.");
+          "permission-denied",
+          "No permission to modify this deck."
+        );
       }
 
-      // Create new card with unique ID
-      const currentCardsLength = deckData.cards.length;
-      const cardId = `${deckId}-card-${currentCardsLength}`;
+      // Get current cards and add new ones
+      const currentCards = deckData.cards || [];
+      const timestamp = new Date().toISOString();
 
-      const newCard = {
-        id: cardId,
-        answerSentence: answerSentence,
-        answerWord: answerWord,
-        targetSentence: targetSentence,
-        targetWord: targetWord,
-      };
+      const newCards = practiceCards.map((card, index) => ({
+        ...card,
+        id: `${deckId}-card-${currentCards.length + index}`,
+        createdAt: timestamp,
+        lastReviewed: null,
+        reviewCount: 0,
+        correctCount: 0,
+        masteryLevel: 0,
+      }));
 
+      // Update deck with all cards
       await deckRef.update({
-        cards: admin.firestore.FieldValue.arrayUnion(newCard),
+        cards: [...currentCards, ...newCards],
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        cardCount: currentCards.length + newCards.length,
       });
 
-      return {message: "Card added successfully.", card: newCard};
+      return {
+        message: "Practice cards added successfully.",
+        cards: newCards,
+      };
     } catch (error) {
-      console.error("Error adding card:", error);
-      throw new functions.https.HttpsError(
-        "internal", "Failed to add card.");
+      console.error("Error in card generation:", error);
+      throw new functions.https.HttpsError("internal", "Failed to generate cards.");
     }
   }
 );
+
 
 export const addStudySession = onRequest((req, res) => {
   corsHandler(req, res, async () => {

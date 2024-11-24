@@ -29,7 +29,7 @@ module.exports = {
     "quotes": ["error", "double"],
     "import/no-unresolved": 0,
     "indent": ["error", 2],
-    "max-len": ["error", {"code": 226}],
+    "max-len": ["error", { "code": 226 }],
     "require-jsdoc": 0,
     "linebreak-style": 0, // Allow both CRLF and LF
     "object-curly-spacing": ["error", "always"], // Consistent spacing in objects

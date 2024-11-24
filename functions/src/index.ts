@@ -476,50 +476,50 @@ async function generatePracticeCards(
 
   const proficiencyLevel = preferences?.proficiencyLevel || "beginner";
 
-  // Define 5 different scenario types for varied practice
   const scenarios = [
     {
       type: "basic",
-      prompt: `Write only a ${proficiencyLevel} level sentence in ${language} using ${targetWord}. The output should be just the sentence, nothing else.`,
+      prompt: `Generate a single ${language} sentence with its English translation. Use this word: "${targetWord}". Format: "${language}: [sentence] | English: [translation]"`,
     },
     {
       type: "daily",
-      prompt: `Write only a ${proficiencyLevel} level sentence about daily activities in ${language} using ${targetWord}. Return just the sentence.`,
+      prompt: `Create a sentence about daily activities in ${language} with its English translation. Use this word: "${targetWord}". Format: "${language}: [sentence] | English: [translation]"`,
     },
     {
       type: "social",
-      prompt: `Write only a ${proficiencyLevel} level sentence about social interactions in ${language} using ${targetWord}. Return just the sentence.`,
+      prompt: `Make a sentence about social interactions in ${language} with its English translation. Use this word: "${targetWord}". Format: "${language}: [sentence] | English: [translation]"`,
     },
     {
       type: "question",
-      prompt: `Write only a ${proficiencyLevel} level question in ${language} using ${targetWord}. Return just the question.`,
+      prompt: `Form a question in ${language} with its English translation. Use this word: "${targetWord}". Format: "${language}: [sentence] | English: [translation]"`,
     },
     {
       type: "response",
-      prompt: `Write only a ${proficiencyLevel} level response in ${language} using ${targetWord}. Return just the response.`,
+      prompt: `Create a response or answer in ${language} with its English translation. Use this word: "${targetWord}". Format: "${language}: [sentence] | English: [translation]"`,
     },
   ];
 
-  // Add context-specific scenarios based on proficiency
+  // Adjust complexity based on proficiency
   if (proficiencyLevel === "intermediate") {
     scenarios.forEach((scenario) => {
-      scenario.prompt += " Include common expressions where appropriate.";
+      scenario.prompt = scenario.prompt.replace("sentence", "moderately complex sentence");
     });
   } else if (proficiencyLevel === "advanced") {
     scenarios.forEach((scenario) => {
-      scenario.prompt += " Use more sophisticated language structures.";
+      scenario.prompt = scenario.prompt.replace("sentence", "sophisticated sentence");
     });
   }
 
   try {
-    // Generate sentences for each scenario
     const cards = await Promise.all(scenarios.map(async (scenario) => {
       try {
         const chatCompletion = await client.chat.completions.create({
           messages: [
             {
               role: "system",
-              content: "You are a language learning assistant. Provide only the requested sentence without any explanations, descriptions, or additional text. The response should be a single sentence in the target language.",
+              content: `You are a language learning assistant. Always respond in this exact format:
+              "${language}: [sentence] | English: [translation]"
+              Do not add any other text or explanations.`,
             },
             {
               role: "user",
@@ -527,23 +527,33 @@ async function generatePracticeCards(
             },
           ],
           model: "llama3-8b-8192",
-          temperature: 0.7, // Add some variation but keep it reasonable
+          temperature: 0.7,
         });
 
-        const targetSentence = chatCompletion.choices[0].message.content?.trim() || "";
-        // Clean up any remaining explanatory text
-        const cleanedSentence = targetSentence
-          .replace(/^(here'?s?|this is|example|\(|\[).*/i, "") //eslint-disable-line
-          .replace(/^[^a-z\u4e00-\u9fff]*/i, "") //eslint-disable-line
-          .replace(/[\(\[\{].*[\)\]\}]/g, "") //eslint-disable-line
-          .trim(); //eslint-disable-line
+        const response = chatCompletion.choices[0].message.content?.trim() || "";
 
-        const answerSentence = await translateText(cleanedSentence, language, "English");
+        // Parse the response to get both sentences
+        const parts = response.split("|").map((part) => part.trim());
+        let targetSentence = "";
+        let answerSentence = "";
+
+        if (parts.length === 2) {
+          targetSentence = parts[0].replace(`${language}:`, "").trim();
+          answerSentence = parts[1].replace("English:", "").trim();
+        } else {
+          // If format is incorrect, try translating
+          targetSentence = response.replace(`${language}:`, "").trim();
+          answerSentence = await translateText(targetSentence, language, "English");
+        }
+
+        // Clean up any remaining metadata or explanations
+        targetSentence = cleanSentence(targetSentence);
+        answerSentence = cleanSentence(answerSentence);
 
         return {
           targetWord,
           answerWord,
-          targetSentence: cleanedSentence,
+          targetSentence,
           answerSentence,
           type: scenario.type,
           difficulty: proficiencyLevel,
@@ -559,11 +569,24 @@ async function generatePracticeCards(
       }
     }));
 
-    return cards.filter((card) => card.targetSentence && card.targetSentence !== targetWord);
+    return cards.filter((card) =>
+      card.targetSentence &&
+      card.answerSentence &&
+      card.targetSentence !== targetWord
+    );
   } catch (error) {
     console.error("Error in generatePracticeCards:", error);
     return [createFallbackCard(targetWord, answerWord, "basic")];
   }
+}
+
+function cleanSentence(sentence: string): string {
+  return sentence
+    .replace(/^(here'?s?|this is|example|\(|\[).*/i, "") //eslint-disable-line
+    .replace(/^[^a-z\u4e00-\u9fff]*/i, "")  //eslint-disable-line
+    .replace(/[\(\[\{].*[\)\]\}]/g, "") //eslint-disable-line
+    .replace(/^[":]/g, "") //eslint-disable-line
+    .trim();
 }
 
 function getContextDescription(type: string): string {
@@ -598,6 +621,7 @@ function createFallbackCard(targetWord: string, answerWord: string, type: string
     },
   };
 }
+
 export const addCard = functions.https.onCall(
   async (request: functions.https.CallableRequest) => {
     if (!request.auth) {

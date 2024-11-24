@@ -3,6 +3,7 @@ import * as functions from "firebase-functions";
 import * as cors from "cors";
 import * as admin from "firebase-admin";
 import {Groq} from "groq-sdk";
+const getCurrentTimestamp = () => new Date().toISOString();
 
 admin.initializeApp({
   credential: admin.credential.applicationDefault(),
@@ -219,30 +220,36 @@ export const saveDeckProgress = functions.https.onCall(
     const progressRef = db.collection("UserProgress").doc(`${userId}_${deckId}`);
 
     try {
-      // Check if the progress document exists
+      const timestamp = getCurrentTimestamp();
+      const progressData = {
+        cardId,
+        correct,
+        timestamp,
+      };
+
       const docSnapshot = await progressRef.get();
 
       if (docSnapshot.exists) {
-        // Update existing progress document
+        // Get existing results
+        const existingData = docSnapshot.data();
+        const results = existingData?.results || [];
+
+        // Add new result
+        results.push(progressData);
+
+        // Update document
         await progressRef.update({
-          results: admin.firestore.FieldValue.arrayUnion({
-            cardId,
-            correct,
-            timestamp: admin.firestore.FieldValue.serverTimestamp(),
-          }),
+          results: results,
+          lastUpdated: timestamp,
         });
       } else {
-        // Create a new progress document
+        // Create new document
         await progressRef.set({
           userId,
           deckId,
-          results: [
-            {
-              cardId,
-              correct,
-              timestamp: admin.firestore.FieldValue.serverTimestamp(),
-            },
-          ],
+          results: [progressData],
+          createdAt: timestamp,
+          lastUpdated: timestamp,
         });
       }
 
@@ -256,7 +263,6 @@ export const saveDeckProgress = functions.https.onCall(
     }
   }
 );
-
 export const getDeckProgress = functions.https.onCall(
   async (
     request: CallableRequest<{ deckId: string }>,
@@ -358,7 +364,6 @@ export const checkUserPreferences = functions.https.onCall(
 
 export const addDeck = functions.https.onCall(
   async (request: functions.https.CallableRequest) => {
-    // Verify user is authenticated
     if (!request.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
@@ -367,8 +372,6 @@ export const addDeck = functions.https.onCall(
     }
 
     const userId = request.auth.uid;
-
-    // Extract required fields from the request
     const {
       deckName,
       description,
@@ -379,7 +382,6 @@ export const addDeck = functions.https.onCall(
       cards = [],
     } = request.data;
 
-    // Validate required fields
     if (!deckName || !description || !Array.isArray(tags)) {
       throw new functions.https.HttpsError(
         "invalid-argument",
@@ -387,7 +389,8 @@ export const addDeck = functions.https.onCall(
       );
     }
 
-    // Construct the new deck object
+    const timestamp = getCurrentTimestamp();
+
     const newDeck = {
       userId,
       deckName,
@@ -396,17 +399,17 @@ export const addDeck = functions.https.onCall(
       isShared,
       sharedWith,
       isAiGenerated,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      cards,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      cards: cards.map((card:any) => ({
+        ...card,
+        createdAt: timestamp,
+      })),
     };
 
     try {
-      // Add the new deck to the database
       const docRef = await db.collection("Deck").add(newDeck);
       console.log("Deck created with ID:", docRef.id);
-
-      // Return the newly created deck ID to the client
       return {id: docRef.id};
     } catch (error) {
       console.error("Error adding deck:", error);
@@ -417,10 +420,8 @@ export const addDeck = functions.https.onCall(
     }
   }
 );
-
 export const getCards = functions.https.onCall(
   async (request: functions.https.CallableRequest) => {
-    // Ensure user is authenticated
     if (!request.auth) {
       throw new functions.https.HttpsError("unauthenticated", "Authentication required.");
     }
@@ -429,7 +430,6 @@ export const getCards = functions.https.onCall(
     const deckId = request.data?.deckId;
 
     try {
-      // Fetch deck and check if user has access
       const deckRef = db.collection("Deck").doc(deckId);
       const docSnapshot = await deckRef.get();
 
@@ -441,8 +441,23 @@ export const getCards = functions.https.onCall(
       if (deckData?.userId !== userId) {
         throw new functions.https.HttpsError("permission-denied", "No permission");
       }
-      // Return the cards from the deck
-      return {cards: deckData?.cards || []};
+
+      // Add IDs to cards if they don't exist
+      const cards = deckData?.cards || [];
+      const cardsWithIds = cards.map((card: any,
+        index: number) => ({
+        ...card,
+        id: card.id || `${deckId}-card-${index}`, // Create a unique ID using deck ID and index
+      }));
+
+      // Update the deck with the new card IDs if necessary
+      if (cards.some((card: any) => !card.id)) {
+        await deckRef.update({
+          cards: cardsWithIds,
+        });
+      }
+
+      return {cards: cardsWithIds};
     } catch (error) {
       console.error("Error fetching cards:", error);
       throw new functions.https.HttpsError("internal", "Failed to retrieve cards.");
@@ -450,10 +465,8 @@ export const getCards = functions.https.onCall(
   }
 );
 
-
 export const addCard = functions.https.onCall(
   async (request: functions.https.CallableRequest) => {
-    // Ensure user is authenticated
     if (!request.auth) {
       throw new functions.https.HttpsError(
         "invalid-argument", "User must be authenticated.");
@@ -463,30 +476,23 @@ export const addCard = functions.https.onCall(
     const answerWord = request.data?.answerWord;
     const language = request.data?.language;
 
-    // Validate the card data
     if (!deckId || !answerWord || !language) {
       throw new functions.https.HttpsError("invalid-argument", "Missing required field.");
     }
 
-    // Perform translations and sentence generation
     let targetWord;
     let targetSentence;
     let answerSentence;
     try {
-      targetWord = await translateText(
-        answerWord, "English", language);
-      targetSentence = await getSentence(
-        language, targetWord);
-      answerSentence = await translateText(
-        targetSentence, language, "English");
+      targetWord = await translateText(answerWord, "English", language);
+      targetSentence = await getSentence(language, targetWord);
+      answerSentence = await translateText(targetSentence, language, "English");
     } catch (error) {
-      console.error(
-        "Error during translation or sentence generation:", error);
+      console.error("Error during translation or sentence generation:", error);
       throw new functions.https.HttpsError("internal", "Translation failed.");
     }
 
     try {
-      // Fetch deck and check if user has access
       const deckRef = db.collection("Deck").doc(deckId);
       const docSnapshot = await deckRef.get();
 
@@ -495,18 +501,25 @@ export const addCard = functions.https.onCall(
       }
 
       const deckData = docSnapshot.data();
-      if (deckData?.userId !== userId) {
+      if (!deckData) {
+        throw new functions.https.HttpsError("not-found", "Deck data is empty.");
+      }
+
+      if (deckData.userId !== userId) {
         throw new functions.https.HttpsError("permission-denied", "No permission");
       }
 
-      // Ensure cards field is valid
-      if (!Array.isArray(deckData?.cards)) {
+      if (!Array.isArray(deckData.cards)) {
         throw new functions.https.HttpsError(
           "failed-precondition", "Deck cards field is not an array.");
       }
 
-      // Add the card to the deck
+      // Create new card with unique ID
+      const currentCardsLength = deckData.cards.length;
+      const cardId = `${deckId}-card-${currentCardsLength}`;
+
       const newCard = {
+        id: cardId,
         answerSentence: answerSentence,
         answerWord: answerWord,
         targetSentence: targetSentence,
@@ -521,7 +534,7 @@ export const addCard = functions.https.onCall(
     } catch (error) {
       console.error("Error adding card:", error);
       throw new functions.https.HttpsError(
-        "internal", "Failed to add card." + targetSentence + answerSentence+ targetWord);
+        "internal", "Failed to add card.");
     }
   }
 );
@@ -553,15 +566,20 @@ export const addStudySession = onRequest((req, res) => {
         return res.status(400).send("Bad Request: Missing required fields.");
       }
 
+      const timestamp = getCurrentTimestamp();
+
       const newSession = {
         userId,
         deckId,
-        startTime: admin.firestore.Timestamp.fromDate(new Date(startTime)),
-        endTime: admin.firestore.Timestamp.fromDate(new Date(endTime)),
-        cardsReviewed,
+        startTime: new Date(startTime).toISOString(),
+        endTime: new Date(endTime).toISOString(),
+        cardsReviewed: cardsReviewed.map((card) => ({
+          ...card,
+          timestamp: getCurrentTimestamp(),
+        })),
         totalCorrect,
         totalIncorrect,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: timestamp,
       };
 
       const docRef = await db.collection("study_sessions").add(newSession);
@@ -572,7 +590,6 @@ export const addStudySession = onRequest((req, res) => {
     }
   });
 });
-
 export const getStudySessions = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {

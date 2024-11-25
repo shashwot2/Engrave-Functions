@@ -156,9 +156,7 @@ export const getDecks = functions.https.onCall(
     }
 
     const userId = request.auth.uid;
-
-    const deckId = request.data?.deckId; // Safely access deckId
-    console.log("deckId:", deckId);
+    const { deckId, language } = request.data;
 
     try {
       if (deckId) {
@@ -178,10 +176,14 @@ export const getDecks = functions.https.onCall(
         return deckData;
       }
 
-      console.log("Fetching all decks for user:", userId);
+      console.log("Fetching decks for user:", userId, "language:", language);
 
+      // Always filter by both userId and language
       const querySnapshot = await db.collection("Deck")
-        .where("userId", "==", userId).get();
+        .where("userId", "==", userId)
+        .where("language", "==", language)
+        .orderBy("createdAt", "desc")
+        .get();
 
       const decks = querySnapshot.docs.map((doc) => ({
         id: doc.id,
@@ -375,17 +377,18 @@ export const addDeck = functions.https.onCall(
     const {
       deckName,
       description,
-      tags,
+      language,
+      tags = [],
       isShared = false,
       sharedWith = [],
       isAiGenerated = false,
       cards = [],
     } = request.data;
 
-    if (!deckName || !description || !Array.isArray(tags)) {
+    if (!deckName || !description || !language) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "Missing or invalid required fields: 'name', 'description', or 'tags'."
+        "Missing required fields: 'name', 'description', or 'language'."
       );
     }
 
@@ -395,13 +398,14 @@ export const addDeck = functions.https.onCall(
       userId,
       deckName,
       description,
-      tags,
+      language,
+      tags: [...tags, language],
       isShared,
       sharedWith,
       isAiGenerated,
       createdAt: timestamp,
       updatedAt: timestamp,
-      cards: cards.map((card:any) => ({
+      cards: cards.map((card: any) => ({
         ...card,
         createdAt: timestamp,
       })),
@@ -420,6 +424,7 @@ export const addDeck = functions.https.onCall(
     }
   }
 );
+
 export const getCards = functions.https.onCall(
   async (request: functions.https.CallableRequest) => {
     if (!request.auth) {

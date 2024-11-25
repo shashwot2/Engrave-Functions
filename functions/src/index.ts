@@ -871,67 +871,6 @@ export const addAnalytics = onRequest((req, res) => {
   });
 });
 
-export const saveSelectedLanguage = onRequest((req, res) => {
-  corsHandler(req, res, async () => {
-    try {
-      if (req.method !== "POST") {
-        return res.status(405).send("Method Not Allowed, use POST");
-      }
-
-      const { userId, language } = req.body;
-
-      if (!userId || !language) {
-        return res.status(400).send("Bad Request: Missing required fields.");
-      }
-
-      const userRef = db.collection("userSettings").doc(userId);
-      await userRef.set({
-        selectedLanguage: language,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
-
-      return res.status(200).json({
-        success: true,
-        language,
-      });
-    } catch (error) {
-      console.error("Error saving language: ", error);
-      return res.status(500).send("Internal Server Error");
-    }
-  });
-});
-
-export const getSelectedLanguage = onRequest((req, res) => {
-  corsHandler(req, res, async () => {
-    try {
-      if (req.method !== "GET") {
-        return res.status(405).send("Method Not Allowed, use GET");
-      }
-
-      const userId = req.query.userId as string;
-
-      if (!userId) {
-        return res.status(400).send("Bad Request: Missing userId.");
-      }
-
-      const userRef = db.collection("userSettings").doc(userId);
-      const doc = await userRef.get();
-
-      if (!doc.exists) {
-        return res.status(200).json({ selectedLanguage: null });
-      }
-
-      return res.status(200).json({
-        selectedLanguage: doc.data()?.selectedLanguage || null,
-      });
-    } catch (error) {
-      console.error("Error getting language: ", error);
-      return res.status(500).send("Internal Server Error");
-    }
-  });
-});
-
-
 export const addSharedDeck = onRequest((req, res) => {
   corsHandler(req, res, async () => {
     try {
